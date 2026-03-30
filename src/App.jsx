@@ -999,7 +999,8 @@ export default function App() {
   const [toast, setToast] = useState({ message: "", type: "" });
   const tokenClientRef = useRef(null);
 
-  const myRole = user ? (roles[user.email] || "admin") : "viewer";
+  // Se o usuário não está no roles: admin apenas se não há ninguém cadastrado (setup inicial), senão viewer
+  const myRole = user ? (roles[user.email] || (Object.keys(roles).length === 0 ? "admin" : "viewer")) : "viewer";
   const canEdit = myRole === "admin" || myRole === "editor";
   const canManageRoles = myRole === "admin";
 
