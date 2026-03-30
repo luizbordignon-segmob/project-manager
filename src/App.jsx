@@ -473,7 +473,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
-      <div className="auto-scroll" style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 960, maxHeight: "94vh", overflow: "auto", boxShadow: "0 24px 48px rgba(0,0,0,.12)", position: "relative" }}>
+      <div style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 960, maxHeight: "94vh", overflow: "hidden", boxShadow: "0 24px 48px rgba(0,0,0,.12)", position: "relative", display: "flex", flexDirection: "column" }}>
         {/* Quick-close X */}
         <button onClick={handleCancel} title="Fechar" style={{ position: "absolute", top: 14, right: 14, zIndex: 20, background: "rgba(255,255,255,.92)", border: "none", borderRadius: "50%", width: 30, height: 30, cursor: "pointer", fontSize: 16, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 4px rgba(0,0,0,.12)", backdropFilter: "blur(4px)" }}
           onMouseEnter={e => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.color = "#ef4444"; }}
@@ -493,7 +493,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
           )}
         </div>
 
-        <div style={{ padding: "24px 28px 28px" }}>
+        <div className="auto-scroll" style={{ padding: "24px 28px 28px", flex: 1, minHeight: 0, overflowY: "auto" }}>
           {/* Name */}
           <div style={{ marginBottom: 20 }}>
             <label style={labelStyle}>Nome do Projeto</label>
@@ -583,7 +583,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
                 </div>
               </div>
             )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 360, overflowY: "auto" }}>
+            <div className="auto-scroll" style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 380, overflowY: "auto" }}>
               {data.tasks.length === 0 && <p style={{ color: "#c0c4cc", fontSize: 13, textAlign: "center", padding: 20, fontFamily: font }}>Nenhuma tarefa</p>}
               {data.tasks.map(task => {
                 const isExpanded = expandedTaskId === task.id;
