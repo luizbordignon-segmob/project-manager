@@ -493,7 +493,9 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
           )}
         </div>
 
-        <div className="auto-scroll" style={{ padding: "24px 28px 28px", flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {/* Static fields */}
+          <div style={{ flexShrink: 0, padding: "24px 28px 0" }}>
           {/* Name */}
           <div style={{ marginBottom: 20 }}>
             <label style={labelStyle}>Nome do Projeto</label>
@@ -538,10 +540,11 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
               ? <textarea value={data.description} onChange={e => set("description", e.target.value)} rows={3} placeholder="Descreva o objetivo do projeto..." style={{ ...inputStyle, resize: "vertical", minHeight: 70 }} />
               : <p style={{ margin: 0, fontSize: 14, color: "#374151", fontFamily: font, whiteSpace: "pre-wrap" }}>{data.description || "Sem descrição"}</p>}
           </div>
+          </div>{/* end static fields */}
 
           {/* Tasks */}
-          <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, padding: "0 28px", marginTop: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Tarefas ({done}/{total})</label>
               {totalCost > 0 && (
                 <div style={{ display: "flex", gap: 6 }}>
@@ -552,7 +555,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
               )}
             </div>
             {canEdit && (
-              <div style={{ border: "1.5px dashed #e5e7eb", borderRadius: 12, padding: "12px 14px", marginBottom: 14, background: "#fafafa" }}>
+              <div style={{ border: "1.5px dashed #e5e7eb", borderRadius: 12, padding: "12px 14px", marginBottom: 14, background: "#fafafa", flexShrink: 0 }}>
                 <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                   <input ref={taskRef} value={newTaskData.text} onChange={e => setNewTaskData(d => ({ ...d, text: e.target.value }))} onKeyDown={e => e.key === "Enter" && addTask()} placeholder="Descrição da tarefa..." style={{ ...inputStyle, flex: 1, marginBottom: 0 }} />
                   <button onClick={addTask} style={{ padding: "10px 20px", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: font, whiteSpace: "nowrap" }}>+ Adicionar</button>
@@ -583,7 +586,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
                 </div>
               </div>
             )}
-            <div className="auto-scroll" style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 380, overflowY: "auto" }}>
+            <div className="auto-scroll" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 80, overflowY: "auto" }}>
               {data.tasks.length === 0 && <p style={{ color: "#c0c4cc", fontSize: 13, textAlign: "center", padding: 20, fontFamily: font }}>Nenhuma tarefa</p>}
               {data.tasks.map(task => {
                 const isExpanded = expandedTaskId === task.id;
@@ -644,7 +647,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
             </div>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 28, paddingTop: 20, borderTop: "1px solid #f0f0f0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, padding: "16px 28px 24px", borderTop: "1px solid #f0f0f0" }}>
             <span style={{ fontSize: 11, color: "#c0c4cc", fontFamily: font }}>Criado em {data.createdAt}</span>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={handleCancel} style={{ padding: "10px 22px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: font }}>{canEdit ? "Cancelar" : "Fechar"}</button>
