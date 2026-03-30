@@ -7,6 +7,7 @@ const CONFIG = {
   ROLES_FILE: "_roles.json",
   // ID da pasta compartilhada no Drive do owner (todos os usuários leem/escrevem aqui)
   SHARED_FOLDER_ID: "1HdeTTWgZisScFSJbps_dLVohmRGCsMwT",
+  OWNER_EMAIL: "luiz.bordignon@segmob.com.br",
 };
 
 const PRIORITIES = { low: { label: "Baixa", color: "#22c55e" }, medium: { label: "Média", color: "#f59e0b" }, high: { label: "Alta", color: "#ef4444" } };
@@ -999,8 +1000,8 @@ export default function App() {
   const [toast, setToast] = useState({ message: "", type: "" });
   const tokenClientRef = useRef(null);
 
-  // Se o usuário não está no roles: admin apenas se não há ninguém cadastrado (setup inicial), senão viewer
-  const myRole = user ? (roles[user.email] || (Object.keys(roles).length === 0 ? "admin" : "viewer")) : "viewer";
+  // Owner sempre admin; cadastrados usam seu papel; desconhecidos são viewer
+  const myRole = user ? (user.email === CONFIG.OWNER_EMAIL ? "admin" : (roles[user.email] || "viewer")) : "viewer";
   const canEdit = myRole === "admin" || myRole === "editor";
   const canManageRoles = myRole === "admin";
 
