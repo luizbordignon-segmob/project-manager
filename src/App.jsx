@@ -593,7 +593,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
                 const hasWeeksErr = weeksErrors.has(task.id);
                 const ancestor = task.ancestorId ? data.tasks.find(t => String(t.id) === String(task.ancestorId)) : null;
                 return (
-                  <div key={task.id} style={{ borderRadius: 10, border: `1px solid ${isExpanded ? "#e0e7ff" : "transparent"}`, background: task.done ? "#f0fdf4" : isExpanded ? "#fafafe" : "#fafafa", overflow: "hidden" }}>
+                  <div key={task.id} style={{ borderRadius: 10, border: `1px solid ${isExpanded ? "#e0e7ff" : "transparent"}`, background: task.done ? "#f0fdf4" : isExpanded ? "#fafafe" : "#fafafa", overflow: "hidden", flexShrink: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
                       <div onClick={() => canEdit && toggleTask(task.id)} style={{ width: 20, height: 20, borderRadius: 6, border: task.done ? "none" : "2px solid #d1d5db", background: task.done ? "#22c55e" : "transparent", cursor: canEdit ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#fff", fontSize: 12, fontWeight: 700 }}>{task.done && "✓"}</div>
                       {editingTaskId === task.id && canEdit
