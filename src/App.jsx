@@ -675,6 +675,8 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
   const [localProjects, setLocalProjects] = useState(projects);
   const [dragState, setDragState] = useState(null); // { projectId, taskId, startX, origOffset, containerWidth, totalMs }
   const [pendingSaves, setPendingSaves] = useState(new Set());
+  const [colWidth, setColWidth] = useState(210);
+  const [resizing, setResizing] = useState(null); // { startX, origWidth }
 
   // Sync from parent when not dragging
   useEffect(() => { if (!dragState) setLocalProjects(projects); }, [projects, dragState]);
@@ -701,6 +703,21 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
   const STATUS_COLORS = { backlog: "#9ca3af", active: "#3b82f6", review: "#f59e0b", done: "#22c55e" };
 
   useEffect(() => { const h = e => e.key === "Escape" && onClose(); window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [onClose]);
+
+  // Column resize
+  const handleResizeStart = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizing({ startX: e.clientX, origWidth: colWidth });
+  };
+  useEffect(() => {
+    if (!resizing) return;
+    const handleMove = e => { const newW = Math.max(120, Math.min(500, resizing.origWidth + (e.clientX - resizing.startX))); setColWidth(newW); };
+    const handleUp = () => setResizing(null);
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => { window.removeEventListener("mousemove", handleMove); window.removeEventListener("mouseup", handleUp); };
+  }, [resizing]);
 
   const handleDragStart = (e, projectId, taskId, containerEl) => {
     e.preventDefault();
@@ -770,8 +787,11 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
             <div style={{ minWidth: 700 }}>
               {/* Header */}
               <div style={{ display: "flex", borderBottom: "1px solid #f0f0f0", background: "#fafafa", position: "sticky", top: 0, zIndex: 10 }}>
-                <div style={{ width: 210, flexShrink: 0, height: 36, borderRight: "1px solid #f0f0f0", display: "flex", alignItems: "center", padding: "0 16px" }}>
+                <div style={{ width: colWidth, flexShrink: 0, height: 36, borderRight: "1px solid #f0f0f0", display: "flex", alignItems: "center", padding: "0 16px", position: "relative" }}>
                   <span style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", fontFamily: font, textTransform: "uppercase", letterSpacing: ".5px" }}>Projeto / Tarefa</span>
+                  <div onMouseDown={handleResizeStart} style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, cursor: "col-resize", background: resizing ? "#3b82f6" : "transparent", transition: "background .15s" }}
+                    onMouseEnter={e => { if (!resizing) e.currentTarget.style.background = "#d1d5db"; }}
+                    onMouseLeave={e => { if (!resizing) e.currentTarget.style.background = "transparent"; }} />
                 </div>
                 <div style={{ flex: 1, position: "relative", height: 36 }}>
                   {months.map((m, i) => (
@@ -795,9 +815,9 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
                   <div key={p.id}>
                     {/* Project row */}
                     <div style={{ display: "flex", borderBottom: "1px solid #f0f0f0", background: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
-                      <div style={{ width: 210, flexShrink: 0, height: 52, display: "flex", alignItems: "center", padding: "0 16px", borderRight: "1px solid #f0f0f0", overflow: "hidden" }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", fontFamily: font, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 178 }}>{p.name}</div>
+                      <div style={{ width: colWidth, flexShrink: 0, height: 52, display: "flex", alignItems: "center", padding: "0 16px", borderRight: "1px solid #f0f0f0", overflow: "hidden" }}>
+                        <div style={{ overflow: "hidden" }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", fontFamily: font, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
                           <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: font, marginTop: 1 }}>{pct}% · {STATUS_MAP[p.status]}</div>
                         </div>
                       </div>
@@ -823,10 +843,10 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
                       const ancEndPct = anc ? getPct(anc._end) : null;
                       return (
                         <div key={task.id} style={{ display: "flex", borderBottom: "1px solid #f9f9f9", background: isDragging ? "#eef2ff" : idx % 2 === 0 ? "#fafffe" : "#f9fafc" }}>
-                          <div style={{ width: 210, flexShrink: 0, height: 34, display: "flex", alignItems: "center", padding: "0 12px 0 28px", borderRight: "1px solid #f0f0f0", overflow: "hidden" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+                          <div style={{ width: colWidth, flexShrink: 0, height: 34, display: "flex", alignItems: "center", padding: "0 12px 0 28px", borderRight: "1px solid #f0f0f0", overflow: "hidden" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden", flex: 1, minWidth: 0 }}>
                               <div style={{ width: 5, height: 5, borderRadius: 2, background: tColor, flexShrink: 0 }} />
-                              <span style={{ fontSize: 11, color: task.done ? "#86efac" : "#6b7280", fontFamily: font, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120, textDecoration: task.done ? "line-through" : "none" }}>{task.text}</span>
+                              <span style={{ fontSize: 11, color: task.done ? "#86efac" : "#6b7280", fontFamily: font, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0, textDecoration: task.done ? "line-through" : "none" }}>{task.text}</span>
                               {task.offsetWeeks !== 0 && <span style={{ fontSize: 9, color: "#a78bfa", fontFamily: font, flexShrink: 0 }}>{task.offsetWeeks > 0 ? "+" : ""}{task.offsetWeeks}s</span>}
                             </div>
                           </div>
