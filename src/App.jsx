@@ -498,7 +498,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
           )}
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }} className="auto-scroll">
           {/* Static fields */}
           <div style={{ flexShrink: 0, padding: "24px 28px 0" }}>
           {/* Name */}
@@ -591,7 +591,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
                 </div>
               </div>
             )}
-            <div className="auto-scroll" style={{ display: "flex", flexDirection: "column", gap: 4, overflowY: "auto", maxHeight: 260, minHeight: 60 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, minHeight: 60 }}>
               {data.tasks.length === 0 && <p style={{ color: "#c0c4cc", fontSize: 13, textAlign: "center", padding: 20, fontFamily: font }}>Nenhuma tarefa</p>}
               {data.tasks.map(task => {
                 const isExpanded = expandedTaskId === task.id;
