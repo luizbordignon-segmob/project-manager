@@ -543,7 +543,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
           </div>{/* end static fields */}
 
           {/* Tasks */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, padding: "0 28px", marginTop: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", padding: "0 28px", marginTop: 8 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Tarefas ({done}/{total})</label>
               {totalCost > 0 && (
@@ -586,7 +586,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
                 </div>
               </div>
             )}
-            <div className="auto-scroll" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 80, overflowY: "auto" }}>
+            <div className="auto-scroll" style={{ display: "flex", flexDirection: "column", gap: 4, overflowY: "auto", maxHeight: 260, minHeight: 60 }}>
               {data.tasks.length === 0 && <p style={{ color: "#c0c4cc", fontSize: 13, textAlign: "center", padding: 20, fontFamily: font }}>Nenhuma tarefa</p>}
               {data.tasks.map(task => {
                 const isExpanded = expandedTaskId === task.id;
