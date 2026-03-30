@@ -215,7 +215,8 @@ function calcProjectSchedule(project) {
     if (!t) return start;
     let tStart = start;
     if (t.ancestorId && taskById[String(t.ancestorId)]) tStart = taskEnd(t.ancestorId);
-    const end = new Date(tStart.getTime() + (t.weeks || 1) * 7 * 86400000);
+    const offset = (t.offsetWeeks || 0) * 7 * 86400000;
+    const end = new Date(tStart.getTime() + offset + (t.weeks || 1) * 7 * 86400000);
     endCache[sid] = end;
     return end;
   }
@@ -225,7 +226,7 @@ function calcProjectSchedule(project) {
   const tasksWithDates = tasks.map(t => {
     const tEnd = endCache[String(t.id)];
     const tStart = new Date(tEnd.getTime() - (t.weeks || 1) * 7 * 86400000);
-    return { ...t, _start: tStart, _end: tEnd };
+    return { ...t, _start: tStart, _end: tEnd, offsetWeeks: t.offsetWeeks || 0 };
   });
 
   const endDate = new Date(Math.max(...tasksWithDates.map(t => t._end.getTime())));
@@ -261,6 +262,7 @@ function projectToMd(p) {
       if (t.assignee) meta.who = t.assignee;
       if (t.cost) meta.cost = t.cost;
       if (t.ancestorId) meta.anc = String(t.ancestorId);
+      if (t.offsetWeeks) meta.off = t.offsetWeeks;
       md += `- [${t.done ? "x" : " "}] ${t.text} <!-- ${JSON.stringify(meta)} -->\n`;
     });
   }
@@ -310,6 +312,7 @@ function mdToProject(md) {
           assignee: meta.who || null,
           cost: meta.cost || null,
           ancestorId: meta.anc || null,
+          offsetWeeks: meta.off || 0,
         };
       }),
     };
@@ -668,8 +671,15 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
 // ═══════════════════════════════════════════════════════════════
 // ▸ GANTT CHART
 // ═══════════════════════════════════════════════════════════════
-function GanttChart({ projects, onClose }) {
-  const projectsData = projects
+function GanttChart({ projects, onClose, onUpdateProject }) {
+  const [localProjects, setLocalProjects] = useState(projects);
+  const [dragState, setDragState] = useState(null); // { projectId, taskId, startX, origOffset, containerWidth, totalMs }
+  const [pendingSaves, setPendingSaves] = useState(new Set());
+
+  // Sync from parent when not dragging
+  useEffect(() => { if (!dragState) setLocalProjects(projects); }, [projects, dragState]);
+
+  const projectsData = localProjects
     .filter(p => p.startDate)
     .map(p => ({ ...p, schedule: calcProjectSchedule(p) }))
     .filter(p => p.schedule.endDate);
@@ -692,13 +702,60 @@ function GanttChart({ projects, onClose }) {
 
   useEffect(() => { const h = e => e.key === "Escape" && onClose(); window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [onClose]);
 
+  const handleDragStart = (e, projectId, taskId, containerEl) => {
+    e.preventDefault();
+    const proj = localProjects.find(p => p.id === projectId);
+    const task = proj?.tasks.find(t => String(t.id) === String(taskId));
+    if (!task || !containerEl) return;
+    const rect = containerEl.getBoundingClientRect();
+    setDragState({ projectId, taskId, startX: e.clientX, origOffset: task.offsetWeeks || 0, containerWidth: rect.width, totalMs });
+  };
+
+  useEffect(() => {
+    if (!dragState) return;
+    const handleMove = e => {
+      const dx = e.clientX - dragState.startX;
+      const msPerPx = dragState.totalMs / dragState.containerWidth;
+      const deltaMs = dx * msPerPx;
+      const deltaWeeks = Math.round(deltaMs / (7 * 86400000));
+      const newOffset = dragState.origOffset + deltaWeeks;
+      setLocalProjects(prev => prev.map(p => p.id === dragState.projectId
+        ? { ...p, tasks: p.tasks.map(t => String(t.id) === String(dragState.taskId) ? { ...t, offsetWeeks: newOffset } : t) }
+        : p
+      ));
+    };
+    const handleUp = e => {
+      const dx = e.clientX - dragState.startX;
+      const msPerPx = dragState.totalMs / dragState.containerWidth;
+      const deltaMs = dx * msPerPx;
+      const deltaWeeks = Math.round(deltaMs / (7 * 86400000));
+      const newOffset = dragState.origOffset + deltaWeeks;
+      if (deltaWeeks !== 0 && onUpdateProject) {
+        const proj = localProjects.find(p => p.id === dragState.projectId);
+        if (proj) {
+          const updated = { ...proj, tasks: proj.tasks.map(t => String(t.id) === String(dragState.taskId) ? { ...t, offsetWeeks: newOffset } : t) };
+          setPendingSaves(prev => new Set([...prev, proj.id]));
+          onUpdateProject(updated).finally(() => setPendingSaves(prev => { const n = new Set(prev); n.delete(proj.id); return n; }));
+        }
+      }
+      setDragState(null);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => { window.removeEventListener("mousemove", handleMove); window.removeEventListener("mouseup", handleUp); };
+  }, [dragState, localProjects, onUpdateProject]);
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "12px 16px" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: "98vw", maxHeight: "96vh", overflow: "hidden", boxShadow: "0 24px 48px rgba(0,0,0,.18)", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "20px 28px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a1a", fontFamily: font }}>Cronograma · Gantt</h2>
-            <p style={{ margin: "3px 0 0", fontSize: 13, color: "#9ca3af", fontFamily: font }}>{projectsData.length} projeto(s) com data de início</p>
+            <p style={{ margin: "3px 0 0", fontSize: 13, color: "#9ca3af", fontFamily: font }}>
+              {projectsData.length} projeto(s) com data de início
+              {pendingSaves.size > 0 && <span style={{ marginLeft: 8, color: "#f59e0b" }}>· Salvando...</span>}
+              <span style={{ marginLeft: 12, fontSize: 11, color: "#b0b5bd" }}>Arraste as tarefas para ajustar a linha do tempo</span>
+            </p>
           </div>
           <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
         </div>
@@ -761,24 +818,29 @@ function GanttChart({ projects, onClose }) {
                       const tEndPct = getPct(task._end);
                       const tWidthPct = Math.max(tEndPct - tStartPct, 0.3);
                       const tColor = task.done ? "#22c55e" : "#6366f1";
+                      const isDragging = dragState?.projectId === p.id && dragState?.taskId === String(task.id);
                       const anc = task.ancestorId ? p.schedule.tasksWithDates.find(t => String(t.id) === String(task.ancestorId)) : null;
                       const ancEndPct = anc ? getPct(anc._end) : null;
                       return (
-                        <div key={task.id} style={{ display: "flex", borderBottom: "1px solid #f9f9f9", background: idx % 2 === 0 ? "#fafffe" : "#f9fafc" }}>
+                        <div key={task.id} style={{ display: "flex", borderBottom: "1px solid #f9f9f9", background: isDragging ? "#eef2ff" : idx % 2 === 0 ? "#fafffe" : "#f9fafc" }}>
                           <div style={{ width: 210, flexShrink: 0, height: 34, display: "flex", alignItems: "center", padding: "0 12px 0 28px", borderRight: "1px solid #f0f0f0", overflow: "hidden" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
                               <div style={{ width: 5, height: 5, borderRadius: 2, background: tColor, flexShrink: 0 }} />
-                              <span style={{ fontSize: 11, color: task.done ? "#86efac" : "#6b7280", fontFamily: font, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 145, textDecoration: task.done ? "line-through" : "none" }}>{task.text}</span>
+                              <span style={{ fontSize: 11, color: task.done ? "#86efac" : "#6b7280", fontFamily: font, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120, textDecoration: task.done ? "line-through" : "none" }}>{task.text}</span>
+                              {task.offsetWeeks !== 0 && <span style={{ fontSize: 9, color: "#a78bfa", fontFamily: font, flexShrink: 0 }}>{task.offsetWeeks > 0 ? "+" : ""}{task.offsetWeeks}s</span>}
                             </div>
                           </div>
-                          <div style={{ flex: 1, position: "relative", height: 34 }}>
+                          <div style={{ flex: 1, position: "relative", height: 34 }} ref={el => { if (el) el._ganttContainer = el; }}>
                             {months.map((m, i) => i > 0 && <div key={i} style={{ position: "absolute", left: `${getPct(m)}%`, top: 0, bottom: 0, width: 1, background: "#f5f5f5" }} />)}
                             <div style={{ position: "absolute", left: `${todayPct}%`, top: 0, bottom: 0, width: 1, background: "#ef444415" }} />
                             {anc && ancEndPct !== null && tStartPct > ancEndPct && (
                               <div style={{ position: "absolute", left: `${ancEndPct}%`, width: `${tStartPct - ancEndPct}%`, top: "50%", height: 1, background: "#c7d2fe" }} />
                             )}
-                            <div style={{ position: "absolute", left: `${tStartPct}%`, width: `${tWidthPct}%`, top: "50%", transform: "translateY(-50%)", height: 16, borderRadius: 4, background: tColor + "20", border: `1px solid ${tColor}50`, display: "flex", alignItems: "center", paddingLeft: 4, overflow: "hidden" }}>
-                              <span style={{ fontSize: 9, fontWeight: 600, color: tColor, fontFamily: font, whiteSpace: "nowrap" }}>
+                            <div
+                              onMouseDown={e => handleDragStart(e, p.id, String(task.id), e.currentTarget.parentElement)}
+                              style={{ position: "absolute", left: `${tStartPct}%`, width: `${tWidthPct}%`, top: "50%", transform: "translateY(-50%)", height: 16, borderRadius: 4, background: isDragging ? tColor + "35" : tColor + "20", border: `1px solid ${isDragging ? tColor : tColor + "50"}`, display: "flex", alignItems: "center", paddingLeft: 4, overflow: "hidden", cursor: "grab", userSelect: "none", transition: isDragging ? "none" : "left 0.15s, background 0.15s" }}
+                            >
+                              <span style={{ fontSize: 9, fontWeight: 600, color: tColor, fontFamily: font, whiteSpace: "nowrap", pointerEvents: "none" }}>
                                 {task.weeks ? `${task.weeks}s` : ""}{task.assignee ? ` ${task.assignee.split(" ")[0]}` : ""}
                               </span>
                             </div>
@@ -1098,6 +1160,11 @@ export default function App() {
     showToast("Projeto salvo no Drive", "success");
   }, [fileMap, folderMap]);
 
+  const saveProjectSilent = useCallback(async (updated) => {
+    setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+    await saveProjectToDrive(updated);
+  }, [fileMap, folderMap]);
+
   const deleteProject = useCallback(async (id) => {
     setProjects(prev => prev.filter(p => p.id !== id));
     const folder = folderMap[id];
@@ -1208,7 +1275,7 @@ export default function App() {
       )}
       {showTeam && <TeamModal onClose={() => setShowTeam(false)} team={team} onUpdateTeam={setTeam} />}
       {showRoles && <RolesModal onClose={() => setShowRoles(false)} roles={roles} onUpdateRoles={setRoles} currentUser={user} />}
-      {showGantt && <GanttChart projects={projects} onClose={() => setShowGantt(false)} />}
+      {showGantt && <GanttChart projects={projects} onClose={() => setShowGantt(false)} onUpdateProject={saveProjectSilent} />}
       <Toast message={toast.message} type={toast.type} />
     </div>
   );
