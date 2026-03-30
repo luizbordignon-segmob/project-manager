@@ -2,9 +2,11 @@ import { useState, useCallback, useRef, useEffect } from "react";
 
 const CONFIG = {
   CLIENT_ID: "557787515939-unu0a0jeuge7aad358qridceu8uqchd2.apps.googleusercontent.com",
-  SCOPES: "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
+  SCOPES: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
   FOLDER_NAME: "ProjectManager",
   ROLES_FILE: "_roles.json",
+  // ID da pasta compartilhada no Drive do owner (todos os usuários leem/escrevem aqui)
+  SHARED_FOLDER_ID: "",
 };
 
 const PRIORITIES = { low: { label: "Baixa", color: "#22c55e" }, medium: { label: "Média", color: "#f59e0b" }, high: { label: "Alta", color: "#ef4444" } };
@@ -32,6 +34,8 @@ class DriveService {
 
   async getOrCreateFolder() {
     if (this.folderId) return this.folderId;
+    // Se há uma pasta compartilhada configurada, usa ela diretamente
+    if (CONFIG.SHARED_FOLDER_ID) { this.folderId = CONFIG.SHARED_FOLDER_ID; return this.folderId; }
     const q = `name='${CONFIG.FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
     if (list.files?.length > 0) { this.folderId = list.files[0].id; return this.folderId; }
