@@ -6,7 +6,7 @@ const CONFIG = {
   FOLDER_NAME: "ProjectManager",
   ROLES_FILE: "_roles.json",
   // ID da pasta compartilhada no Drive do owner (todos os usuários leem/escrevem aqui)
-  SHARED_FOLDER_ID: "",
+  SHARED_FOLDER_ID: "1HdeTTWgZisScFSJbps_dLVohmRGCsMwT",
 };
 
 const PRIORITIES = { low: { label: "Baixa", color: "#22c55e" }, medium: { label: "Média", color: "#f59e0b" }, high: { label: "Alta", color: "#ef4444" } };
