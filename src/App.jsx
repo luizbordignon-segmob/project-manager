@@ -676,14 +676,24 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
   const [pendingSaves, setPendingSaves] = useState(new Set());
   const [colWidth, setColWidth] = useState(210);
   const [resizing, setResizing] = useState(null); // { startX, origWidth }
+  const [ganttFilter, setGanttFilter] = useState("all");
 
   // Sync from parent when not dragging
   useEffect(() => { if (!dragState) setLocalProjects(projects); }, [projects, dragState]);
 
+  const STATUS_ORDER = { active: 0, review: 1, backlog: 2, done: 3 };
   const projectsData = localProjects
     .filter(p => p.startDate)
+    .filter(p => ganttFilter === "all" ? true : p.status === ganttFilter)
     .map(p => ({ ...p, schedule: calcProjectSchedule(p) }))
-    .filter(p => p.schedule.endDate);
+    .filter(p => p.schedule.endDate)
+    .sort((a, b) => {
+      const sA = STATUS_ORDER[a.status] ?? 9, sB = STATUS_ORDER[b.status] ?? 9;
+      if (sA !== sB) return sA - sB;
+      const pctA = a.tasks.length === 0 ? 0 : a.tasks.filter(t => t.done).length / a.tasks.length;
+      const pctB = b.tasks.length === 0 ? 0 : b.tasks.filter(t => t.done).length / b.tasks.length;
+      return pctB - pctA;
+    });
 
   const today = new Date();
   const allDates = projectsData.flatMap(p => [new Date(p.startDate + "T12:00:00"), p.schedule.endDate]);
@@ -765,15 +775,22 @@ function GanttChart({ projects, onClose, onUpdateProject }) {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "12px 16px" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: "98vw", maxHeight: "96vh", overflow: "hidden", boxShadow: "0 24px 48px rgba(0,0,0,.18)", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "20px 28px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a1a", fontFamily: font }}>Cronograma · Gantt</h2>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a1a", fontFamily: font }}>Cronograma · Gantt</h2>
+              <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
+                {[["all", "Todos"], ["active", "Ativos"], ["review", "Revisão"], ["backlog", "Backlog"], ["done", "Concluídos"]].map(([k, l]) => (
+                  <button key={k} onClick={() => setGanttFilter(k)} style={{ padding: "4px 10px", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: font, background: ganttFilter === k ? "#fff" : "transparent", color: ganttFilter === k ? "#1a1a1a" : "#9ca3af", boxShadow: ganttFilter === k ? "0 1px 3px rgba(0,0,0,.06)" : "none", transition: "all .15s" }}>{l}</button>
+                ))}
+              </div>
+            </div>
             <p style={{ margin: "3px 0 0", fontSize: 13, color: "#9ca3af", fontFamily: font }}>
-              {projectsData.length} projeto(s) com data de início
+              {projectsData.length} projeto(s)
               {pendingSaves.size > 0 && <span style={{ marginLeft: 8, color: "#f59e0b" }}>· Salvando...</span>}
               <span style={{ marginLeft: 12, fontSize: 11, color: "#b0b5bd" }}>Arraste as tarefas para ajustar a linha do tempo</span>
             </p>
           </div>
-          <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>×</button>
         </div>
 
         <div style={{ flex: 1, overflow: "auto" }}>
