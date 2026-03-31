@@ -113,13 +113,12 @@ class DriveService {
     const foldersQ = `'${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     const foldersRes = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(foldersQ)}&fields=files(id,name)`);
     const projectFolders = (foldersRes.files || []).filter(f => f.name !== "Team");
-    const results = [];
-    for (const pf of projectFolders) {
+    const allResults = await Promise.all(projectFolders.map(async pf => {
       const q = `'${pf.id}' in parents and name contains '.md' and trashed=false`;
       const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`);
-      for (const f of (list.files || []).filter(f => f.name.endsWith(".md"))) results.push({ ...f, projectFolderId: pf.id });
-    }
-    return results;
+      return (list.files || []).filter(f => f.name.endsWith(".md")).map(f => ({ ...f, projectFolderId: pf.id }));
+    }));
+    return allResults.flat();
   }
 
   async readFile(fileId) {
@@ -1162,26 +1161,45 @@ export default function App() {
   const syncFromDrive = async () => {
     setSyncing(true);
     try {
-      const files = await drive.listMdFiles();
-      const loaded = [], map = {}, folders = {};
-      for (const file of files) {
+      // 1) List files + load roles/team in parallel
+      const [files, rolesData, teamData] = await Promise.all([
+        drive.listMdFiles(),
+        drive.loadRoles(),
+        drive.loadTeam(),
+      ]);
+      setRoles(rolesData);
+      setTeam(teamData);
+
+      // 2) Read all project files in parallel
+      const fileContents = await Promise.all(files.map(async file => {
         const content = await drive.readFile(file.id);
+        return { file, content };
+      }));
+
+      // 3) Parse projects, then load images + docs folders in parallel
+      const parsed = fileContents.map(({ file, content }) => {
         const project = mdToProject(content);
-        if (project) {
-          if (project.imageFileId) { try { project.image = await drive.readFileAsDataUrl(project.imageFileId); } catch { project.image = null; } }
-          loaded.push(project);
-          map[project.id] = file.id;
-          const docsFolderId = await drive.getOrCreateDocumentsFolder(file.projectFolderId);
-          folders[project.id] = { fileId: file.id, projectFolderId: file.projectFolderId, docsFolderId, imageFileId: project.imageFileId || null };
-        }
+        return project ? { file, project } : null;
+      }).filter(Boolean);
+
+      const results = await Promise.all(parsed.map(async ({ file, project }) => {
+        const [image, docsFolderId] = await Promise.all([
+          project.imageFileId ? drive.readFileAsDataUrl(project.imageFileId).catch(() => null) : Promise.resolve(null),
+          drive.getOrCreateDocumentsFolder(file.projectFolderId),
+        ]);
+        project.image = image;
+        return { file, project, docsFolderId };
+      }));
+
+      const loaded = [], map = {}, folders = {};
+      for (const { file, project, docsFolderId } of results) {
+        loaded.push(project);
+        map[project.id] = file.id;
+        folders[project.id] = { fileId: file.id, projectFolderId: file.projectFolderId, docsFolderId, imageFileId: project.imageFileId || null };
       }
       setProjects(loaded);
       setFileMap(map);
       setFolderMap(folders);
-      const r = await drive.loadRoles();
-      setRoles(r);
-      const t = await drive.loadTeam();
-      setTeam(t);
       showToast(`${loaded.length} projeto(s) sincronizado(s)`, "success");
     } catch (e) { showToast("Erro ao sincronizar: " + e.message, "error"); }
     setSyncing(false);
@@ -1240,7 +1258,12 @@ export default function App() {
     showToast("Projeto removido", "success");
   }, [fileMap, folderMap]);
 
-  const filtered = filter === "all" ? projects : projects.filter(p => p.status === filter);
+  const filtered = (filter === "all" ? projects : projects.filter(p => p.status === filter))
+    .slice().sort((a, b) => {
+      const pctA = a.tasks.length === 0 ? 0 : a.tasks.filter(t => t.done).length / a.tasks.length;
+      const pctB = b.tasks.length === 0 ? 0 : b.tasks.filter(t => t.done).length / b.tasks.length;
+      return pctB - pctA;
+    });
   const stats = {
     total: filtered.length,
     active: filtered.filter(p => p.status === "active" || p.status === "review").length,
@@ -1295,7 +1318,7 @@ export default function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 3 }}>
-            {[["all", "Todos"], ["backlog", "Backlog"], ["active", "Ativos"], ["review", "Revisão"], ["done", "Concluídos"]].map(([k, l]) => (
+            {[["all", "Todos"], ["active", "Ativos"], ["review", "Revisão"], ["backlog", "Backlog"], ["done", "Concluídos"]].map(([k, l]) => (
               <button key={k} onClick={() => setFilter(k)} style={{ padding: "6px 12px", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, background: filter === k ? "#fff" : "transparent", color: filter === k ? "#1a1a1a" : "#9ca3af", boxShadow: filter === k ? "0 1px 3px rgba(0,0,0,.06)" : "none", transition: "all .15s" }}>{l}</button>
             ))}
           </div>
