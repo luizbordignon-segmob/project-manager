@@ -1242,14 +1242,14 @@ export default function App() {
 
   const filtered = filter === "all" ? projects : projects.filter(p => p.status === filter);
   const stats = {
-    total: projects.length,
-    active: projects.filter(p => p.status === "active" || p.status === "review").length,
-    done: projects.filter(p => p.status === "done").length,
-    overdue: projects.filter(p => { const s = calcProjectSchedule(p); return s.endDate && s.endDate < new Date() && p.status !== "done"; }).length,
+    total: filtered.length,
+    active: filtered.filter(p => p.status === "active" || p.status === "review").length,
+    done: filtered.filter(p => p.status === "done").length,
+    overdue: filtered.filter(p => { const s = calcProjectSchedule(p); return s.endDate && s.endDate < new Date() && p.status !== "done"; }).length,
   };
-  const allTasks = projects.flatMap(p => p.tasks);
-  const costTotal = allTasks.reduce((s, t) => s + (Number(t.cost) || 0), 0);
-  const costPaid = allTasks.filter(t => t.done).reduce((s, t) => s + (Number(t.cost) || 0), 0);
+  const filteredTasks = filtered.flatMap(p => p.tasks);
+  const costTotal = filteredTasks.reduce((s, t) => s + (Number(t.cost) || 0), 0);
+  const costPaid = filteredTasks.filter(t => t.done).reduce((s, t) => s + (Number(t.cost) || 0), 0);
   const costPending = costTotal - costPaid;
 
   if (!user && restoring) return (
@@ -1285,7 +1285,8 @@ export default function App() {
             {stats.overdue > 0 && <span style={{ color: "#ef4444", fontWeight: 600 }}> · {stats.overdue} atrasado(s)</span>}
           </p>
           {costTotal > 0 && (
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", fontFamily: font }}>Custos aproximados</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff", padding: "2px 10px", borderRadius: 6, fontFamily: font }}>Total {costTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", background: "#f0fdf4", padding: "2px 10px", borderRadius: 6, fontFamily: font }}>Pago {costPaid.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#b45309", background: "#fff7ed", padding: "2px 10px", borderRadius: 6, fontFamily: font }}>A pagar {costPending.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
@@ -1294,7 +1295,7 @@ export default function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 3 }}>
-            {[["all", "Todos"], ["active", "Ativos"], ["review", "Revisão"], ["done", "Concluídos"]].map(([k, l]) => (
+            {[["all", "Todos"], ["backlog", "Backlog"], ["active", "Ativos"], ["review", "Revisão"], ["done", "Concluídos"]].map(([k, l]) => (
               <button key={k} onClick={() => setFilter(k)} style={{ padding: "6px 12px", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, background: filter === k ? "#fff" : "transparent", color: filter === k ? "#1a1a1a" : "#9ca3af", boxShadow: filter === k ? "0 1px 3px rgba(0,0,0,.06)" : "none", transition: "all .15s" }}>{l}</button>
             ))}
           </div>
