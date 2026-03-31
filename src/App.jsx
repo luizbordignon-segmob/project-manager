@@ -1080,6 +1080,7 @@ export default function App() {
   const [roles, setRoles] = useState({});
   const [team, setTeam] = useState([]);
   const [toast, setToast] = useState({ message: "", type: "" });
+  const [restoring, setRestoring] = useState(true);
   const tokenClientRef = useRef(null);
 
   // Owner sempre admin; cadastrados usam seu papel; desconhecidos são viewer
@@ -1092,6 +1093,32 @@ export default function App() {
     setTimeout(() => setToast({ message: "", type: "" }), 3000);
   };
 
+  // Persist/restore session helpers
+  const saveSession = (token, expiresIn, userInfo) => {
+    const expiresAt = Date.now() + (expiresIn || 3600) * 1000;
+    sessionStorage.setItem("pm_token", token);
+    sessionStorage.setItem("pm_token_expires", String(expiresAt));
+    sessionStorage.setItem("pm_user", JSON.stringify(userInfo));
+  };
+  const clearSession = () => {
+    sessionStorage.removeItem("pm_token");
+    sessionStorage.removeItem("pm_token_expires");
+    sessionStorage.removeItem("pm_user");
+  };
+
+  const handleAuthSuccess = async (token, expiresIn, isRestore = false) => {
+    drive.setToken(token);
+    try {
+      const userInfo = await drive.getUserInfo();
+      saveSession(token, expiresIn, userInfo);
+      setUser(userInfo);
+      await syncFromDrive();
+    } catch (e) {
+      if (isRestore) { clearSession(); } else { showToast("Erro na autenticação: " + e.message, "error"); }
+    }
+    setLoading(false);
+  };
+
   const initGoogle = useCallback(() => {
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
@@ -1101,16 +1128,30 @@ export default function App() {
         scope: CONFIG.SCOPES,
         callback: async (response) => {
           if (response.access_token) {
-            drive.setToken(response.access_token);
-            try {
-              const userInfo = await drive.getUserInfo();
-              setUser(userInfo);
-              await syncFromDrive();
-            } catch (e) { showToast("Erro na autenticação: " + e.message, "error"); }
-            setLoading(false);
+            await handleAuthSuccess(response.access_token, response.expires_in);
           }
         },
       });
+
+      // Try to restore saved session
+      const savedToken = sessionStorage.getItem("pm_token");
+      const expiresAt = Number(sessionStorage.getItem("pm_token_expires") || "0");
+      const savedUser = sessionStorage.getItem("pm_user");
+      if (savedToken && expiresAt > Date.now() && savedUser) {
+        // Token still valid — restore silently
+        setLoading(true);
+        handleAuthSuccess(savedToken, Math.round((expiresAt - Date.now()) / 1000), true)
+          .finally(() => setRestoring(false));
+      } else if (savedUser && savedToken) {
+        // Token expired — try silent re-auth with prompt:''
+        clearSession();
+        setLoading(true);
+        tokenClientRef.current.requestAccessToken({ prompt: "" });
+        // If silent fails, Google shows consent — user picks account once
+        setRestoring(false);
+      } else {
+        setRestoring(false);
+      }
     };
     document.body.appendChild(script);
   }, []);
@@ -1211,6 +1252,11 @@ export default function App() {
   const costPaid = allTasks.filter(t => t.done).reduce((s, t) => s + (Number(t.cost) || 0), 0);
   const costPending = costTotal - costPaid;
 
+  if (!user && restoring) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontFamily: font, color: "#9ca3af", fontSize: 15 }}>
+      Carregando...
+    </div>
+  );
   if (!user) return <LoginScreen onLogin={handleLogin} loading={loading} />;
 
   return (
