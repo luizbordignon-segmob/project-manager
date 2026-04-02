@@ -619,7 +619,7 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
                 </div>
               </div>
             )}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, minHeight: 60 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, minHeight: 60, marginBottom: 16 }}>
               {data.tasks.length === 0 && <p style={{ color: "#c0c4cc", fontSize: 13, textAlign: "center", padding: 20, fontFamily: font }}>Nenhuma tarefa</p>}
               {data.tasks.map((task, idx) => {
                 const isExpanded = expandedTaskId === task.id;
