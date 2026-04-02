@@ -417,6 +417,8 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
   const [expandedTaskId, setExpandedTaskId] = useState(null);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [weeksErrors, setWeeksErrors] = useState(new Set());
+  const [dragTaskId, setDragTaskId] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
   const fileRef = useRef(), taskRef = useRef();
 
   const total = data.tasks.length, done = data.tasks.filter(t => t.done).length;
@@ -471,6 +473,30 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
     set("tasks", data.tasks.filter(t => t.id !== id));
     if (expandedTaskId === id) setExpandedTaskId(null);
   };
+
+  const handleTaskDragStart = (e, taskId) => {
+    setDragTaskId(taskId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", taskId);
+  };
+  const handleTaskDragOver = (e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIdx(idx);
+  };
+  const handleTaskDrop = (e, dropIdx) => {
+    e.preventDefault();
+    if (dragTaskId == null) return;
+    const fromIdx = data.tasks.findIndex(t => t.id === dragTaskId);
+    if (fromIdx === -1 || fromIdx === dropIdx) { setDragTaskId(null); setDragOverIdx(null); return; }
+    const tasks = [...data.tasks];
+    const [moved] = tasks.splice(fromIdx, 1);
+    tasks.splice(dropIdx, 0, moved);
+    set("tasks", tasks);
+    setDragTaskId(null);
+    setDragOverIdx(null);
+  };
+  const handleTaskDragEnd = () => { setDragTaskId(null); setDragOverIdx(null); };
 
   const handleImage = e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => set("image", ev.target.result); r.readAsDataURL(f); };
 
@@ -595,13 +621,16 @@ function ProjectModal({ project, onClose, onSave, onCancelNew, canEdit, isNew, d
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 4, minHeight: 60 }}>
               {data.tasks.length === 0 && <p style={{ color: "#c0c4cc", fontSize: 13, textAlign: "center", padding: 20, fontFamily: font }}>Nenhuma tarefa</p>}
-              {data.tasks.map(task => {
+              {data.tasks.map((task, idx) => {
                 const isExpanded = expandedTaskId === task.id;
                 const hasWeeksErr = weeksErrors.has(task.id);
                 const ancestor = task.ancestorId ? data.tasks.find(t => String(t.id) === String(task.ancestorId)) : null;
+                const isDragging = dragTaskId === task.id;
+                const isDropTarget = dragOverIdx === idx && dragTaskId !== task.id;
                 return (
-                  <div key={task.id} style={{ borderRadius: 10, border: `1px solid ${isExpanded ? "#e0e7ff" : "transparent"}`, background: task.done ? "#f0fdf4" : isExpanded ? "#fafafe" : "#fafafa", overflow: "hidden", flexShrink: 0 }}>
+                  <div key={task.id} draggable={canEdit} onDragStart={e => handleTaskDragStart(e, task.id)} onDragOver={e => handleTaskDragOver(e, idx)} onDrop={e => handleTaskDrop(e, idx)} onDragEnd={handleTaskDragEnd} style={{ borderRadius: 10, border: `1px solid ${isDropTarget ? "#6366f1" : isExpanded ? "#e0e7ff" : "transparent"}`, background: isDragging ? "#e0e7ff" : task.done ? "#f0fdf4" : isExpanded ? "#fafafe" : "#fafafa", overflow: "hidden", flexShrink: 0, opacity: isDragging ? 0.5 : 1, transition: "border-color .15s, opacity .15s", borderTop: isDropTarget ? "2px solid #6366f1" : undefined }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
+                      {canEdit && <div style={{ cursor: "grab", color: "#c0c4cc", fontSize: 14, flexShrink: 0, userSelect: "none", lineHeight: 1 }} title="Arrastar para reordenar">⠿</div>}
                       <div onClick={() => canEdit && toggleTask(task.id)} style={{ width: 20, height: 20, borderRadius: 6, border: task.done ? "none" : "2px solid #d1d5db", background: task.done ? "#22c55e" : "transparent", cursor: canEdit ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#fff", fontSize: 12, fontWeight: 700 }}>{task.done && "✓"}</div>
                       {editingTaskId === task.id && canEdit
                         ? <input autoFocus value={task.text} onChange={e => updateTask(task.id, "text", e.target.value)} onBlur={() => setEditingTaskId(null)} onKeyDown={e => e.key === "Enter" && setEditingTaskId(null)} style={{ flex: 1, fontSize: 14, fontFamily: font, border: "none", outline: "1px solid #3b82f6", borderRadius: 6, padding: "2px 6px", background: "#fff" }} />
