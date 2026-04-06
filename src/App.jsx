@@ -18,7 +18,7 @@ const ROLES = { admin: { label: "Administrador", color: "#7c3aed", icon: "👑" 
 // ▸ GOOGLE DRIVE SERVICE
 // ═══════════════════════════════════════════════════════════════
 class DriveService {
-  constructor() { this.token = null; this.folderId = null; this.user = null; }
+  constructor() { this.token = null; this.folderId = null; this.user = null; this._wsCache = {}; }
   setToken(token) { this.token = token; }
 
   async fetchApi(url, options = {}) {
@@ -43,16 +43,6 @@ class DriveService {
     const folder = await this.fetchApi("https://www.googleapis.com/drive/v3/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: CONFIG.FOLDER_NAME, mimeType: "application/vnd.google-apps.folder" }) });
     this.folderId = folder.id;
     return this.folderId;
-  }
-
-  async getOrCreateProjectFolder(projectName) {
-    const rootId = await this.getOrCreateFolder();
-    const safeName = (projectName || "Projeto").trim().replace(/[/\\:*?"<>|]/g, "").trim() || "Projeto";
-    const q = `'${rootId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-    const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
-    if (list.files?.length > 0) return list.files[0].id;
-    const folder = await this.fetchApi("https://www.googleapis.com/drive/v3/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: safeName, mimeType: "application/vnd.google-apps.folder", parents: [rootId] }) });
-    return folder.id;
   }
 
   async getOrCreateDocumentsFolder(projectFolderId) {
@@ -106,19 +96,6 @@ class DriveService {
     const res = await fetch(url, { method: existingFileId ? "PATCH" : "POST", headers: { Authorization: `Bearer ${this.token}`, "Content-Type": `multipart/related; boundary=${boundary}` }, body });
     if (!res.ok) { const err = await res.text().catch(() => ""); throw new Error(`Upload falhou ${res.status}: ${err}`); }
     return res.json();
-  }
-
-  async listMdFiles() {
-    const rootId = await this.getOrCreateFolder();
-    const foldersQ = `'${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-    const foldersRes = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(foldersQ)}&fields=files(id,name)`);
-    const projectFolders = (foldersRes.files || []).filter(f => f.name !== "Team" && !f.name.startsWith("_workspace_"));
-    const allResults = await Promise.all(projectFolders.map(async pf => {
-      const q = `'${pf.id}' in parents and name contains '.md' and trashed=false`;
-      const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`);
-      return (list.files || []).filter(f => f.name.endsWith(".md")).map(f => ({ ...f, projectFolderId: pf.id }));
-    }));
-    return allResults.flat();
   }
 
   async readFile(fileId) {
@@ -195,12 +172,14 @@ class DriveService {
   }
 
   async getOrCreateWorkspaceFolder(workspaceId) {
+    if (this._wsCache[workspaceId]) return this._wsCache[workspaceId];
     const rootId = await this.getOrCreateFolder();
     const safeName = `_workspace_${workspaceId}`;
     const q = `'${rootId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
-    if (list.files?.length > 0) return list.files[0].id;
+    if (list.files?.length > 0) { this._wsCache[workspaceId] = list.files[0].id; return list.files[0].id; }
     const folder = await this.fetchApi("https://www.googleapis.com/drive/v3/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: safeName, mimeType: "application/vnd.google-apps.folder", parents: [rootId] }) });
+    this._wsCache[workspaceId] = folder.id;
     return folder.id;
   }
 
@@ -1165,8 +1144,8 @@ function LoginScreen({ onLogin, loading }) {
 // ═══════════════════════════════════════════════════════════════
 export default function App() {
   const [user, setUser] = useState(null);
-  const [tabs, setTabs] = useState([{ id: "default", name: "Projetos" }]);
-  const [activeTabId, setActiveTabId] = useState("default");
+  const [tabs, setTabs] = useState([]);
+  const [activeTabId, setActiveTabId] = useState(null);
   const [tabDataMap, setTabDataMap] = useState({}); // { [tabId]: { projects, fileMap, folderMap } }
   const [editing, setEditing] = useState(null);
   const [filter, setFilter] = useState("all");
@@ -1277,35 +1256,40 @@ export default function App() {
   const handleLogin = () => { setLoading(true); tokenClientRef.current?.requestAccessToken(); };
 
   const syncTabProjects = async (tabId) => {
-    const rootId = await drive.getOrCreateFolder();
-    const workspaceRoot = tabId === "default" ? rootId : await drive.getOrCreateWorkspaceFolder(tabId);
-    const files = tabId === "default" ? await drive.listMdFiles() : await drive.listMdFilesInFolder(workspaceRoot);
+    const workspaceRoot = await drive.getOrCreateWorkspaceFolder(tabId);
+    const files = await drive.listMdFilesInFolder(workspaceRoot);
 
+    // Read all .md files in parallel
     const fileContents = await Promise.all(files.map(async file => {
       const content = await drive.readFile(file.id);
       return { file, content };
     }));
 
-    const parsed = fileContents.map(({ file, content }) => {
-      const project = mdToProject(content);
-      return project ? { file, project } : null;
-    }).filter(Boolean);
-
-    const results = await Promise.all(parsed.map(async ({ file, project }) => {
-      const [image, docsFolderId] = await Promise.all([
-        project.imageFileId ? drive.readFileAsDataUrl(project.imageFileId).catch(() => null) : Promise.resolve(null),
-        drive.getOrCreateDocumentsFolder(file.projectFolderId),
-      ]);
-      project.image = image;
-      return { file, project, docsFolderId };
-    }));
-
+    // Parse projects — no image/docs loading during sync (lazy)
     const loaded = [], map = {}, folders = {};
-    for (const { file, project, docsFolderId } of results) {
+    for (const { file, content } of fileContents) {
+      const project = mdToProject(content);
+      if (!project) continue;
       loaded.push(project);
       map[project.id] = file.id;
-      folders[project.id] = { fileId: file.id, projectFolderId: file.projectFolderId, docsFolderId, imageFileId: project.imageFileId || null };
+      folders[project.id] = { fileId: file.id, projectFolderId: file.projectFolderId, docsFolderId: null, imageFileId: project.imageFileId || null };
     }
+
+    // Load images in background (non-blocking)
+    const projectsWithImages = loaded.filter(p => p.imageFileId);
+    if (projectsWithImages.length > 0) {
+      Promise.all(projectsWithImages.map(async p => {
+        try {
+          const image = await drive.readFileAsDataUrl(p.imageFileId);
+          setTabDataMap(prev => {
+            const tab = prev[tabId];
+            if (!tab) return prev;
+            return { ...prev, [tabId]: { ...tab, projects: tab.projects.map(pr => pr.id === p.id ? { ...pr, image } : pr) } };
+          });
+        } catch {}
+      }));
+    }
+
     return { projects: loaded, fileMap: map, folderMap: folders };
   };
 
@@ -1319,13 +1303,23 @@ export default function App() {
       ]);
       setRoles(rolesData);
       setTeam(teamData);
-      if (savedTabs?.length) setTabs(savedTabs);
 
-      const tabsToUse = savedTabs?.length ? savedTabs : tabs;
+      let tabsToUse;
+      if (savedTabs?.length) {
+        tabsToUse = savedTabs;
+      } else {
+        // First time — create a default tab
+        tabsToUse = [{ id: String(Date.now()), name: "Projetos" }];
+        drive.saveTabs(tabsToUse).catch(() => {});
+      }
+      setTabs(tabsToUse);
+
       const targetTabId = tabIdOverride || activeTabId;
+      const validTabId = tabsToUse.find(t => t.id === targetTabId) ? targetTabId : tabsToUse[0].id;
+      if (validTabId !== activeTabId) setActiveTabId(validTabId);
 
-      const data = await syncTabProjects(targetTabId);
-      setTabDataMap(prev => ({ ...prev, [targetTabId]: data }));
+      const data = await syncTabProjects(validTabId);
+      setTabDataMap(prev => ({ ...prev, [validTabId]: data }));
       showToast(`${data.projects.length} projeto(s) sincronizado(s)`, "success");
     } catch (e) { showToast("Erro ao sincronizar: " + e.message, "error"); }
     setSyncing(false);
@@ -1350,8 +1344,7 @@ export default function App() {
       const existing = folderMap[project.id];
       let projectFolderId = existing?.projectFolderId;
       if (!projectFolderId) {
-        const rootId = await drive.getOrCreateFolder();
-        const workspaceRoot = activeTabId === "default" ? rootId : await drive.getOrCreateWorkspaceFolder(activeTabId);
+        const workspaceRoot = await drive.getOrCreateWorkspaceFolder(activeTabId);
         projectFolderId = await drive.getOrCreateProjectFolderIn(project.name, workspaceRoot);
       }
       const docsFolderId = existing?.docsFolderId || await drive.getOrCreateDocumentsFolder(projectFolderId);
