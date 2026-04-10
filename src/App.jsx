@@ -1603,11 +1603,11 @@ export default function App() {
           <button onClick={() => setShowGantt(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>📊 Gantt</button>
           <button onClick={() => setShowTeam(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>👥 Equipe</button>
           {canManageRoles && <button onClick={() => setShowRoles(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>🔑 Acessos</button>}
-          {syncing ? (
+          {syncing && projects.length === 0 ? (
             <div style={{ width: 140, height: 38, background: "#f3f4f6", borderRadius: 10, overflow: "hidden", position: "relative" }}>
               <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent, #e0e7ff, transparent)", animation: "loadbar 1.2s ease-in-out infinite" }} />
             </div>
-          ) : canEdit && projects.length === 0 ? (
+          ) : canEdit ? (
             <button onClick={addProject} style={{ padding: "10px 20px", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Novo Projeto</button>
           ) : null}
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 12px 4px 4px", background: "#f3f4f6", borderRadius: 10 }}>
