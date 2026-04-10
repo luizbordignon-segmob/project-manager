@@ -1210,6 +1210,8 @@ export default function App() {
   const [toast, setToast] = useState({ message: "", type: "" });
   const [restoring, setRestoring] = useState(true);
   const [editingTabId, setEditingTabId] = useState(null);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncLabel, setSyncLabel] = useState("");
   const tokenClientRef = useRef(null);
   const refreshTimerRef = useRef(null);
 
@@ -1352,12 +1354,21 @@ export default function App() {
   const handleLogin = () => { setLoading(true); tokenClientRef.current?.requestAccessToken(); };
 
   const syncTabProjects = async (tabId) => {
+    setSyncLabel("Listando projetos...");
+    setSyncProgress(30);
     const workspaceRoot = await drive.getOrCreateWorkspaceFolder(tabId);
     const files = await drive.listMdFilesInFolder(workspaceRoot);
+    setSyncProgress(45);
 
-    // Read all .md files in parallel
+    // Read all .md files with progress tracking
+    let read = 0;
+    const total = files.length || 1;
+    setSyncLabel(`Lendo projetos (0/${total})...`);
     const fileContents = await Promise.all(files.map(async file => {
       const content = await drive.readFile(file.id);
+      read++;
+      setSyncProgress(45 + Math.round((read / total) * 50));
+      setSyncLabel(`Lendo projetos (${read}/${total})...`);
       return { file, content };
     }));
 
@@ -1391,8 +1402,11 @@ export default function App() {
 
   const syncFromDrive = async (tabIdOverride) => {
     setSyncing(true);
+    setSyncProgress(0);
+    setSyncLabel("Carregando configurações...");
     try {
       const { roles: rolesData, tabs: savedTabs, team: teamData } = await drive.loadAllConfig();
+      setSyncProgress(20);
       setRoles(rolesData);
       setTeam(teamData);
 
@@ -1411,10 +1425,13 @@ export default function App() {
       if (validTabId !== activeTabId) setActiveTabId(validTabId);
 
       const data = await syncTabProjects(validTabId);
+      setSyncProgress(100);
+      setSyncLabel("Concluído");
       setTabDataMap(prev => ({ ...prev, [validTabId]: data }));
       showToast(`${data.projects.length} projeto(s) sincronizado(s)`, "success");
     } catch (e) { showToast("Erro ao sincronizar: " + e.message, "error"); }
     setSyncing(false);
+    setSyncProgress(0);
   };
 
   const switchTab = async (tabId) => {
@@ -1423,11 +1440,16 @@ export default function App() {
     setEditing(null);
     if (!tabDataMap[tabId]) {
       setSyncing(true);
+      setSyncProgress(0);
+      setSyncLabel("Carregando aba...");
       try {
+        setSyncProgress(20);
         const data = await syncTabProjects(tabId);
+        setSyncProgress(100);
         setTabDataMap(prev => ({ ...prev, [tabId]: data }));
       } catch (e) { showToast("Erro ao carregar aba: " + e.message, "error"); }
       setSyncing(false);
+      setSyncProgress(0);
     }
   };
 
@@ -1542,7 +1564,6 @@ export default function App() {
       <style>{`
         @keyframes slideIn{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
         @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes loadbar{0%{transform:translateX(-100%)}50%{transform:translateX(0%)}100%{transform:translateX(100%)}}
         .auto-scroll{scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color .3s}
         .auto-scroll:hover{scrollbar-color:rgba(0,0,0,.18) transparent}
         .auto-scroll::-webkit-scrollbar{width:4px;height:4px}
@@ -1604,8 +1625,9 @@ export default function App() {
           <button onClick={() => setShowTeam(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>👥 Equipe</button>
           {canManageRoles && <button onClick={() => setShowRoles(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>🔑 Acessos</button>}
           {syncing && projects.length === 0 ? (
-            <div style={{ width: 140, height: 38, background: "#f3f4f6", borderRadius: 10, overflow: "hidden", position: "relative" }}>
-              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent, #e0e7ff, transparent)", animation: "loadbar 1.2s ease-in-out infinite" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 16px", background: "#f3f4f6", borderRadius: 10 }}>
+              <CircularProgress percent={syncProgress} size={28} />
+              <span style={{ fontSize: 12, color: "#6b7280", fontFamily: font, fontWeight: 500, whiteSpace: "nowrap" }}>{syncLabel}</span>
             </div>
           ) : canEdit ? (
             <button onClick={addProject} style={{ padding: "10px 20px", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Novo Projeto</button>
@@ -1623,10 +1645,11 @@ export default function App() {
       <main style={{ padding: "28px 32px" }}>
         {syncing && projects.length === 0 ? (
           <div style={{ textAlign: "center", padding: "80px 20px" }}>
-            <div style={{ width: 220, height: 6, background: "#f3f4f6", borderRadius: 3, overflow: "hidden", margin: "0 auto 20px", position: "relative" }}>
-              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent, #6366f1, transparent)", animation: "loadbar 1.2s ease-in-out infinite" }} />
+            <CircularProgress percent={syncProgress} size={72} />
+            <p style={{ fontSize: 14, color: "#6b7280", fontFamily: font, marginTop: 16, fontWeight: 500 }}>{syncLabel}</p>
+            <div style={{ width: 200, height: 4, background: "#f3f4f6", borderRadius: 2, overflow: "hidden", margin: "12px auto 0" }}>
+              <div style={{ height: "100%", background: syncProgress === 100 ? "#22c55e" : "#6366f1", borderRadius: 2, width: `${syncProgress}%`, transition: "width .3s ease, background .3s" }} />
             </div>
-            <p style={{ fontSize: 14, color: "#9ca3af", fontFamily: font }}>Carregando projetos...</p>
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: "80px 20px" }}>
