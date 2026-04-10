@@ -18,11 +18,27 @@ const ROLES = { admin: { label: "Administrador", color: "#7c3aed", icon: "👑" 
 // ▸ GOOGLE DRIVE SERVICE
 // ═══════════════════════════════════════════════════════════════
 class DriveService {
-  constructor() { this.token = null; this.folderId = null; this.user = null; this._wsCache = {}; }
+  constructor() { this.token = null; this.folderId = null; this.user = null; this._wsCache = {}; this._onTokenExpired = null; this._refreshing = null; }
   setToken(token) { this.token = token; }
+  onTokenExpired(cb) { this._onTokenExpired = cb; }
+
+  async _refreshIfNeeded() {
+    if (!this._onTokenExpired) return;
+    if (!this._refreshing) this._refreshing = this._onTokenExpired().finally(() => { this._refreshing = null; });
+    return this._refreshing;
+  }
+
+  async _fetchWithRetry(url, options = {}) {
+    let res = await fetch(url, { ...options, headers: { Authorization: `Bearer ${this.token}`, ...options.headers } });
+    if (res.status === 401 && this._onTokenExpired) {
+      await this._refreshIfNeeded();
+      res = await fetch(url, { ...options, headers: { Authorization: `Bearer ${this.token}`, ...options.headers } });
+    }
+    return res;
+  }
 
   async fetchApi(url, options = {}) {
-    const res = await fetch(url, { ...options, headers: { Authorization: `Bearer ${this.token}`, ...options.headers } });
+    const res = await this._fetchWithRetry(url, options);
     if (!res.ok) { const err = await res.text().catch(() => ""); throw new Error(`Drive API ${res.status}: ${err}`); }
     return res.json();
   }
@@ -93,13 +109,13 @@ class DriveService {
     const url = existingFileId
       ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart&fields=id,name`
       : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name";
-    const res = await fetch(url, { method: existingFileId ? "PATCH" : "POST", headers: { Authorization: `Bearer ${this.token}`, "Content-Type": `multipart/related; boundary=${boundary}` }, body });
+    const res = await this._fetchWithRetry(url, { method: existingFileId ? "PATCH" : "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body });
     if (!res.ok) { const err = await res.text().catch(() => ""); throw new Error(`Upload falhou ${res.status}: ${err}`); }
     return res.json();
   }
 
   async readFile(fileId) {
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${this.token}` } });
+    const res = await this._fetchWithRetry(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
     if (!res.ok) throw new Error("Erro ao ler arquivo");
     return res.text();
   }
@@ -111,7 +127,7 @@ class DriveService {
   }
 
   async deleteFile(fileId) {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: "DELETE", headers: { Authorization: `Bearer ${this.token}` } });
+    await this._fetchWithRetry(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: "DELETE" });
   }
 
   async saveImage(dataUrl, existingFileId = null, projectFolderId = null) {
@@ -133,13 +149,13 @@ class DriveService {
     const url = existingFileId
       ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart&fields=id`
       : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id`;
-    const res = await fetch(url, { method: existingFileId ? "PATCH" : "POST", headers: { Authorization: `Bearer ${this.token}`, "Content-Type": `multipart/related; boundary=${boundary}` }, body });
+    const res = await this._fetchWithRetry(url, { method: existingFileId ? "PATCH" : "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body });
     if (!res.ok) { const err = await res.text().catch(() => ""); throw new Error(`Imagem ${res.status}: ${err}`); }
     return (await res.json()).id;
   }
 
   async readFileAsDataUrl(fileId) {
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${this.token}` } });
+    const res = await this._fetchWithRetry(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
     if (!res.ok) throw new Error("Erro ao ler imagem");
     const blob = await res.blob();
     return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = e => resolve(e.target.result); reader.onerror = reject; reader.readAsDataURL(blob); });
@@ -1160,6 +1176,7 @@ export default function App() {
   const [restoring, setRestoring] = useState(true);
   const [editingTabId, setEditingTabId] = useState(null);
   const tokenClientRef = useRef(null);
+  const refreshTimerRef = useRef(null);
 
   // Helpers to access/update per-tab data
   const currentTabData = tabDataMap[activeTabId] || { projects: [], fileMap: {}, folderMap: {} };
@@ -1202,8 +1219,44 @@ export default function App() {
     sessionStorage.removeItem("pm_user");
   };
 
+  // Schedule proactive token refresh (5 min before expiry)
+  const scheduleRefresh = (expiresIn) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    const refreshMs = Math.max((expiresIn - 300) * 1000, 60000); // at least 1 min
+    refreshTimerRef.current = setTimeout(() => {
+      if (tokenClientRef.current) {
+        tokenClientRef.current.requestAccessToken({ prompt: "" });
+      }
+    }, refreshMs);
+  };
+
+  // Silent refresh for DriveService 401 retry
+  const silentRefresh = () => new Promise((resolve, reject) => {
+    if (!tokenClientRef.current) return reject(new Error("No token client"));
+    const origCb = tokenClientRef.current._callback;
+    // Temporarily override callback for this one-shot refresh
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: CONFIG.CLIENT_ID,
+      scope: CONFIG.SCOPES,
+      callback: (response) => {
+        if (response.access_token) {
+          drive.setToken(response.access_token);
+          const expiresIn = response.expires_in || 3600;
+          saveSession(response.access_token, expiresIn, JSON.parse(sessionStorage.getItem("pm_user") || "{}"));
+          scheduleRefresh(expiresIn);
+          resolve();
+        } else {
+          reject(new Error("Refresh failed"));
+        }
+      },
+    });
+    client.requestAccessToken({ prompt: "" });
+  });
+
   const handleAuthSuccess = async (token, expiresIn, isRestore = false) => {
     drive.setToken(token);
+    drive.onTokenExpired(silentRefresh);
+    scheduleRefresh(expiresIn || 3600);
     try {
       const userInfo = await drive.getUserInfo();
       saveSession(token, expiresIn, userInfo);
@@ -1224,7 +1277,16 @@ export default function App() {
         scope: CONFIG.SCOPES,
         callback: async (response) => {
           if (response.access_token) {
-            await handleAuthSuccess(response.access_token, response.expires_in);
+            // If user is already logged in, this is a proactive refresh — just update token
+            const currentUser = sessionStorage.getItem("pm_user");
+            if (currentUser && user) {
+              drive.setToken(response.access_token);
+              const expiresIn = response.expires_in || 3600;
+              saveSession(response.access_token, expiresIn, JSON.parse(currentUser));
+              scheduleRefresh(expiresIn);
+            } else {
+              await handleAuthSuccess(response.access_token, response.expires_in);
+            }
           }
         },
       });
@@ -1243,7 +1305,6 @@ export default function App() {
         clearSession();
         setLoading(true);
         tokenClientRef.current.requestAccessToken({ prompt: "" });
-        // If silent fails, Google shows consent — user picks account once
         setRestoring(false);
       } else {
         setRestoring(false);
@@ -1252,7 +1313,7 @@ export default function App() {
     document.body.appendChild(script);
   }, []);
 
-  useEffect(() => { initGoogle(); }, [initGoogle]);
+  useEffect(() => { initGoogle(); return () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }; }, [initGoogle]);
   const handleLogin = () => { setLoading(true); tokenClientRef.current?.requestAccessToken(); };
 
   const syncTabProjects = async (tabId) => {
