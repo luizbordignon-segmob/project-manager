@@ -203,12 +203,16 @@ class DriveService {
     const foldersQ = `'${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     const foldersRes = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(foldersQ)}&fields=files(id,name)`);
     const projectFolders = (foldersRes.files || []).filter(f => f.name !== "Team" && !f.name.startsWith("_workspace_"));
-    const allResults = await Promise.all(projectFolders.map(async pf => {
-      const q = `'${pf.id}' in parents and name contains '.md' and trashed=false`;
-      const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`);
-      return (list.files || []).filter(f => f.name.endsWith(".md")).map(f => ({ ...f, projectFolderId: pf.id }));
-    }));
-    return allResults.flat();
+    if (projectFolders.length === 0) return [];
+    // Single query for all .md files across all project folders (instead of N queries)
+    const parentClauses = projectFolders.map(pf => `'${pf.id}' in parents`).join(" or ");
+    const mdQ = `(${parentClauses}) and name contains '.md' and trashed=false`;
+    const mdRes = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(mdQ)}&fields=files(id,name,parents)&pageSize=1000`);
+    const folderIdSet = new Set(projectFolders.map(f => f.id));
+    return (mdRes.files || []).filter(f => f.name.endsWith(".md")).map(f => {
+      const parentId = f.parents?.find(p => folderIdSet.has(p)) || f.parents?.[0];
+      return { id: f.id, name: f.name, projectFolderId: parentId };
+    });
   }
 
   async getOrCreateProjectFolderIn(projectName, rootId) {
@@ -229,6 +233,37 @@ class DriveService {
       const content = await this.readFile(list.files[0].id);
       return JSON.parse(content);
     } catch { return null; }
+  }
+
+  // Bulk load: roles, tabs, team in fewer API calls
+  async loadAllConfig() {
+    const rootId = await this.getOrCreateFolder();
+    // Single query: get all direct children of root (folders + json files)
+    const q = `'${rootId}' in parents and trashed=false`;
+    const list = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType)&pageSize=200`);
+    const files = list.files || [];
+
+    const rolesFile = files.find(f => f.name === CONFIG.ROLES_FILE);
+    const tabsFile = files.find(f => f.name === "_tabs.json");
+    const teamFolder = files.find(f => f.name === "Team" && f.mimeType === "application/vnd.google-apps.folder");
+
+    // Read all config files in parallel
+    const [rolesContent, tabsContent, teamContent] = await Promise.all([
+      rolesFile ? this.readFile(rolesFile.id).catch(() => "{}") : Promise.resolve("{}"),
+      tabsFile ? this.readFile(tabsFile.id).catch(() => "null") : Promise.resolve("null"),
+      teamFolder ? (async () => {
+        const tq = `'${teamFolder.id}' in parents and name='team.json' and trashed=false`;
+        const tl = await this.fetchApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(tq)}&fields=files(id)`);
+        if (!tl.files?.length) return "[]";
+        return this.readFile(tl.files[0].id).catch(() => "[]");
+      })() : Promise.resolve("[]"),
+    ]);
+
+    let roles = {}, tabs = null, team = [];
+    try { roles = JSON.parse(rolesContent); } catch {}
+    try { tabs = JSON.parse(tabsContent); } catch {}
+    try { team = JSON.parse(teamContent); } catch {}
+    return { roles, tabs, team };
   }
 
   async saveTabs(tabs) {
@@ -1357,11 +1392,7 @@ export default function App() {
   const syncFromDrive = async (tabIdOverride) => {
     setSyncing(true);
     try {
-      const [rolesData, teamData, savedTabs] = await Promise.all([
-        drive.loadRoles(),
-        drive.loadTeam(),
-        drive.loadTabs(),
-      ]);
+      const { roles: rolesData, tabs: savedTabs, team: teamData } = await drive.loadAllConfig();
       setRoles(rolesData);
       setTeam(teamData);
 
@@ -1511,6 +1542,7 @@ export default function App() {
       <style>{`
         @keyframes slideIn{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
         @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes loadbar{0%{transform:translateX(-100%)}50%{transform:translateX(0%)}100%{transform:translateX(100%)}}
         .auto-scroll{scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color .3s}
         .auto-scroll:hover{scrollbar-color:rgba(0,0,0,.18) transparent}
         .auto-scroll::-webkit-scrollbar{width:4px;height:4px}
@@ -1571,7 +1603,13 @@ export default function App() {
           <button onClick={() => setShowGantt(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>📊 Gantt</button>
           <button onClick={() => setShowTeam(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>👥 Equipe</button>
           {canManageRoles && <button onClick={() => setShowRoles(true)} style={{ padding: "8px 14px", background: "#f3f4f6", color: "#6b7280", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}>🔑 Acessos</button>}
-          {canEdit && <button onClick={addProject} style={{ padding: "10px 20px", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Novo Projeto</button>}
+          {syncing ? (
+            <div style={{ width: 140, height: 38, background: "#f3f4f6", borderRadius: 10, overflow: "hidden", position: "relative" }}>
+              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent, #e0e7ff, transparent)", animation: "loadbar 1.2s ease-in-out infinite" }} />
+            </div>
+          ) : canEdit && projects.length === 0 ? (
+            <button onClick={addProject} style={{ padding: "10px 20px", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Novo Projeto</button>
+          ) : null}
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 12px 4px 4px", background: "#f3f4f6", borderRadius: 10 }}>
             {user.picture ? <img src={user.picture} alt="" style={{ width: 28, height: 28, borderRadius: 8 }} referrerPolicy="no-referrer" /> : <div style={{ width: 28, height: 28, borderRadius: 8, background: "#ddd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>👤</div>}
             <div>
@@ -1583,7 +1621,14 @@ export default function App() {
       </header>
 
       <main style={{ padding: "28px 32px" }}>
-        {filtered.length === 0 ? (
+        {syncing && projects.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "80px 20px" }}>
+            <div style={{ width: 220, height: 6, background: "#f3f4f6", borderRadius: 3, overflow: "hidden", margin: "0 auto 20px", position: "relative" }}>
+              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent, #6366f1, transparent)", animation: "loadbar 1.2s ease-in-out infinite" }} />
+            </div>
+            <p style={{ fontSize: 14, color: "#9ca3af", fontFamily: font }}>Carregando projetos...</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: "80px 20px" }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
             <p style={{ fontSize: 16, color: "#9ca3af", marginBottom: 24, fontFamily: font }}>{projects.length === 0 ? "Nenhum projeto ainda" : "Nenhum projeto neste filtro"}</p>
